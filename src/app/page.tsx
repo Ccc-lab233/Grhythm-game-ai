@@ -18,7 +18,6 @@ interface GameState {
   greatCount: number;
   goodCount: number;
   totalNotes: number;
-  isGameOver: boolean;
   isPaused: boolean;
 }
 
@@ -68,7 +67,6 @@ const SCORE_VALUES = {
   miss: 0,
 };
 
-const MAX_MISSES = 5;
 const NOTE_TRAVEL_TIME = 1800; // ms for a note to travel from top to hit zone
 const LANE_WIDTH = 88;
 const NOTE_HEIGHT = 22;
@@ -217,7 +215,7 @@ function StartScreen({
             <span key={k} className="font-mono font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[11px]">{k}</span>
           ))}
         </span> 键击打音符</p>
-        <p>MISS 五次即失败</p>
+        <p>尽情享受音乐吧</p>
       </div>
     </div>
   );
@@ -245,7 +243,6 @@ function GamePlay({
     greatCount: 0,
     goodCount: 0,
     totalNotes: 0,
-    isGameOver: false,
     gameEnded: false,
   });
   const notesRef = useRef<ActiveNote[]>([]);
@@ -258,7 +255,6 @@ function GamePlay({
     score: 0,
     combo: 0,
     missCount: 0,
-    isGameOver: false,
   });
   const [countdown, setCountdown] = useState(3);
   const [playing, setPlaying] = useState(false);
@@ -321,7 +317,7 @@ function GamePlay({
       if (keysDownRef.current.has(laneIndex)) return;
       keysDownRef.current.add(laneIndex);
 
-      if (!gameStartedRef.current || gameStateRef.current.isGameOver) return;
+      if (!gameStartedRef.current) return;
 
       const currentTime = performance.now() - gameStateRef.current.startTime;
       let closestNoteIdx = -1;
@@ -386,30 +382,6 @@ function GamePlay({
     };
   }, []);
 
-  // Game over check
-  const triggerGameOver = useCallback(() => {
-    if (gameStateRef.current.isGameOver || gameStateRef.current.gameEnded) return;
-    gameStateRef.current.isGameOver = true;
-    setDisplayState(prev => ({ ...prev, isGameOver: true }));
-    if (audioRef.current) audioRef.current.pause();
-    setTimeout(() => {
-      if (!gameStateRef.current.gameEnded) {
-        gameStateRef.current.gameEnded = true;
-        onEnd({
-          score: gameStateRef.current.score,
-          combo: gameStateRef.current.maxCombo,
-          maxCombo: gameStateRef.current.maxCombo,
-          missCount: gameStateRef.current.missCount,
-          perfectCount: gameStateRef.current.perfectCount,
-          greatCount: gameStateRef.current.greatCount,
-          goodCount: gameStateRef.current.goodCount,
-          totalNotes: gameStateRef.current.totalNotes,
-          isGameOver: true,
-        });
-      }
-    }, 2000);
-  }, [onEnd]);
-
   const triggerGameEnd = useCallback(() => {
     if (gameStateRef.current.gameEnded) return;
     gameStateRef.current.gameEnded = true;
@@ -424,7 +396,6 @@ function GamePlay({
         greatCount: gameStateRef.current.greatCount,
         goodCount: gameStateRef.current.goodCount,
         totalNotes: gameStateRef.current.totalNotes,
-        isGameOver: false,
       });
     }, 1500);
   }, [onEnd]);
@@ -584,7 +555,6 @@ function GamePlay({
 
       // Draw notes
       let allNotesProcessed = true;
-      let needsMissCheck = false;
 
       const notes = notesRef.current;
       for (let ni = 0; ni < notes.length; ni++) {
@@ -614,7 +584,6 @@ function GamePlay({
             time: performance.now(),
           });
 
-          needsMissCheck = true;
           continue;
         }
 
@@ -663,11 +632,6 @@ function GamePlay({
         ctx.beginPath();
         ctx.roundRect(noteX, noteY, noteW, NOTE_HEIGHT, 7);
         ctx.stroke();
-      }
-
-      // Check miss count for game over
-      if (needsMissCheck && gameStateRef.current.missCount >= MAX_MISSES) {
-        triggerGameOver();
       }
 
       // Draw hit effects
@@ -746,7 +710,6 @@ function GamePlay({
           score: gameStateRef.current.score,
           combo: gameStateRef.current.combo,
           missCount: gameStateRef.current.missCount,
-          isGameOver: gameStateRef.current.isGameOver,
         });
       }
 
@@ -765,15 +728,14 @@ function GamePlay({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [playing, dimensions, triggerGameOver, triggerGameEnd, song.duration]);
+  }, [playing, dimensions, triggerGameEnd, song.duration]);
 
   // Touch handlers
   const handleTouchStart = useCallback((laneIndex: number) => (e: React.TouchEvent) => {
     e.preventDefault();
     keysDownRef.current.add(laneIndex);
-    keyFlashRef.current.push({ lane: laneIndex, time: performance.now() });
 
-    if (!gameStartedRef.current || gameStateRef.current.isGameOver) return;
+    if (!gameStartedRef.current) return;
 
     const currentTime = performance.now() - gameStateRef.current.startTime;
     let closestNoteIdx = -1;
@@ -884,20 +846,8 @@ function GamePlay({
 
         {/* Miss counter */}
         <div className="text-right bg-white/60 backdrop-blur-sm rounded-xl px-3 py-1.5">
-          <p className="text-[10px] text-gray-400 font-semibold tracking-wider mb-1">MISS</p>
-          <div className="flex gap-1 justify-end">
-            {Array.from({ length: MAX_MISSES }).map((_, i) => (
-              <div
-                key={i}
-                className="w-3.5 h-3.5 rounded-full transition-all duration-300"
-                style={{
-                  backgroundColor: i < displayState.missCount ? '#FF3B30' : '#E5E7EB',
-                  boxShadow: i < displayState.missCount ? '0 0 6px #FF3B3050' : 'none',
-                  transform: i < displayState.missCount ? 'scale(1.1)' : 'scale(1)',
-                }}
-              />
-            ))}
-          </div>
+          <p className="text-[10px] text-gray-400 font-semibold tracking-wider">MISS</p>
+          <p className="text-xl font-black text-red-400 font-mono">{displayState.missCount}</p>
         </div>
       </div>
 
@@ -926,15 +876,6 @@ function GamePlay({
         </div>
       )}
 
-      {/* Game Over overlay */}
-      {displayState.isGameOver && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/90 z-20 animate-fade-in">
-          <div className="text-center">
-            <p className="text-6xl font-black text-red-400 mb-4">FAILED</p>
-            <p className="text-lg text-gray-400">MISS 次数过多 💔</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -986,23 +927,31 @@ function ResultScreen({
           <p className="text-sm text-gray-300 mt-1">总分</p>
         </div>
 
-        {/* Stats grid */}
-        <div className="grid grid-cols-2 gap-2.5 mb-4">
-          <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl p-3 text-center border border-yellow-100/50">
-            <p className="text-2xl font-bold text-amber-500">{state.perfectCount}</p>
+        {/* Hit vs Miss summary */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl p-4 text-center border border-green-100/50">
+            <p className="text-3xl font-black text-green-500">{state.perfectCount + state.greatCount + state.goodCount}</p>
+            <p className="text-xs text-green-400 font-semibold tracking-wider mt-0.5">HIT</p>
+          </div>
+          <div className="bg-gradient-to-br from-red-50 to-rose-50 rounded-xl p-4 text-center border border-red-100/50">
+            <p className="text-3xl font-black text-red-400">{state.missCount}</p>
+            <p className="text-xs text-red-300 font-semibold tracking-wider mt-0.5">MISS</p>
+          </div>
+        </div>
+
+        {/* Stats detail */}
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl p-2.5 text-center border border-yellow-100/50">
+            <p className="text-xl font-bold text-amber-500">{state.perfectCount}</p>
             <p className="text-[10px] text-amber-400 font-semibold tracking-wider">PERFECT</p>
           </div>
-          <div className="bg-gradient-to-br from-cyan-50 to-sky-50 rounded-xl p-3 text-center border border-cyan-100/50">
-            <p className="text-2xl font-bold text-cyan-500">{state.greatCount}</p>
+          <div className="bg-gradient-to-br from-cyan-50 to-sky-50 rounded-xl p-2.5 text-center border border-cyan-100/50">
+            <p className="text-xl font-bold text-cyan-500">{state.greatCount}</p>
             <p className="text-[10px] text-cyan-400 font-semibold tracking-wider">GREAT</p>
           </div>
-          <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-3 text-center border border-orange-100/50">
-            <p className="text-2xl font-bold text-orange-400">{state.goodCount}</p>
+          <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-2.5 text-center border border-orange-100/50">
+            <p className="text-xl font-bold text-orange-400">{state.goodCount}</p>
             <p className="text-[10px] text-orange-300 font-semibold tracking-wider">GOOD</p>
-          </div>
-          <div className="bg-gradient-to-br from-red-50 to-rose-50 rounded-xl p-3 text-center border border-red-100/50">
-            <p className="text-2xl font-bold text-red-400">{state.missCount}</p>
-            <p className="text-[10px] text-red-300 font-semibold tracking-wider">MISS</p>
           </div>
         </div>
 
@@ -1013,17 +962,10 @@ function ResultScreen({
         </div>
       </div>
 
-      {/* Result status */}
-      {state.isGameOver ? (
-        <div className="mb-6 px-6 py-3 bg-red-50/80 rounded-2xl border border-red-100/50">
-          <p className="text-red-400 font-bold text-lg">💔 挑战失败</p>
-          <p className="text-red-300 text-sm">MISS 次数达到 {MAX_MISSES} 次</p>
-        </div>
-      ) : (
-        <div className="mb-6 px-6 py-3 bg-green-50/80 rounded-2xl border border-green-100/50">
-          <p className="text-green-500 font-bold text-lg">🎉 挑战成功！</p>
-        </div>
-      )}
+      {/* Result status - always show completion */}
+      <div className="mb-6 px-6 py-3 bg-green-50/80 rounded-2xl border border-green-100/50">
+        <p className="text-green-500 font-bold text-lg">🎉 演奏完成！</p>
+      </div>
 
       {/* Buttons */}
       <div className="flex gap-3">
@@ -1059,7 +1001,6 @@ export default function Home() {
     greatCount: 0,
     goodCount: 0,
     totalNotes: 0,
-    isGameOver: false,
     isPaused: false,
   });
 
@@ -1094,7 +1035,6 @@ export default function Home() {
       greatCount: 0,
       goodCount: 0,
       totalNotes: 0,
-      isGameOver: false,
     }));
     setResultState(null);
   }, []);
