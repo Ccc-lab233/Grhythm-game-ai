@@ -233,6 +233,12 @@ function GamePlay({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const hitBufferRef = useRef<{ perfect: AudioBuffer | null; great: AudioBuffer | null; good: AudioBuffer | null }>({
+    perfect: null,
+    great: null,
+    good: null,
+  });
   const gameStateRef = useRef({
     startTime: 0,
     score: 0,
@@ -275,6 +281,48 @@ function GamePlay({
     notesRef.current = activeNotes;
     gameStateRef.current.totalNotes = activeNotes.length;
   }, [beatmap]);
+
+  // Initialize Web Audio API and load hit sounds
+  useEffect(() => {
+    const ctx = new AudioContext();
+    audioCtxRef.current = ctx;
+
+    const loadSound = async (url: string): Promise<AudioBuffer> => {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      return ctx.decodeAudioData(arrayBuffer);
+    };
+
+    Promise.all([
+      loadSound('/audio/hit.wav'),
+      loadSound('/audio/hit_great.wav'),
+      loadSound('/audio/hit_good.wav'),
+    ]).then(([perfectBuf, greatBuf, goodBuf]) => {
+      hitBufferRef.current = { perfect: perfectBuf, great: greatBuf, good: goodBuf };
+    }).catch(console.error);
+
+    return () => {
+      ctx.close();
+    };
+  }, []);
+
+  // Play hit sound helper
+  const playHitSound = useCallback((type: 'perfect' | 'great' | 'good') => {
+    const ctx = audioCtxRef.current;
+    const buffer = hitBufferRef.current[type];
+    if (!ctx || !buffer) return;
+    try {
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const gain = ctx.createGain();
+      gain.gain.value = type === 'perfect' ? 0.35 : type === 'great' ? 0.25 : 0.18;
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.start(0);
+    } catch {
+      // Ignore audio errors
+    }
+  }, []);
 
   // Handle resize
   useEffect(() => {
@@ -359,6 +407,8 @@ function GamePlay({
         const comboMultiplier = Math.min(1 + Math.floor(gameStateRef.current.combo / 10) * 0.1, 2);
         gameStateRef.current.score += Math.round(SCORE_VALUES[hitType] * comboMultiplier);
 
+        playHitSound(hitType);
+
         hitEffectsRef.current.push({
           id: Date.now() + Math.random(),
           lane: laneIndex,
@@ -380,7 +430,7 @@ function GamePlay({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [playHitSound]);
 
   const triggerGameEnd = useCallback(() => {
     if (gameStateRef.current.gameEnded) return;
@@ -777,6 +827,8 @@ function GamePlay({
       const comboMultiplier = Math.min(1 + Math.floor(gameStateRef.current.combo / 10) * 0.1, 2);
       gameStateRef.current.score += Math.round(SCORE_VALUES[hitType] * comboMultiplier);
 
+      playHitSound(hitType);
+
       hitEffectsRef.current.push({
         id: Date.now() + Math.random(),
         lane: laneIndex,
@@ -784,7 +836,7 @@ function GamePlay({
         time: performance.now(),
       });
     }
-  }, []);
+  }, [playHitSound]);
 
   const handleTouchEnd = useCallback((laneIndex: number) => () => {
     keysDownRef.current.delete(laneIndex);
