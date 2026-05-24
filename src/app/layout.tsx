@@ -15,23 +15,31 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "节拍律动 - Rhythm Game",
-  description: "A rhythm game built with Next.js. Use A, S, D, F keys or touch to play!",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
+  description: "🎵 一款网页音游！用 A/S/D/F 键或触屏跟随节拍击打音符，支持多首曲目和三种难度。A web rhythm game with keyboard & touch controls!",
+  keywords: ["rhythm game", "音游", "music game", "beat game", "Next.js", "TypeScript"],
+  authors: [{ name: "Z.ai" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
   },
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "节拍律动 - Rhythm Game 🎵",
+    description: "跟随节拍击打音符！支持键盘和触屏操作，三种难度挑战。",
     type: "website",
+    locale: "zh_CN",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1344,
+        height: 768,
+        alt: "节拍律动 - Rhythm Game",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
+    title: "节拍律动 - Rhythm Game 🎵",
+    description: "跟随节拍击打音符！支持键盘和触屏操作，三种难度挑战。",
+    images: ["/og-image.png"],
   },
 };
 
