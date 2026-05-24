@@ -257,6 +257,7 @@ function GamePlay({
   const animFrameRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [activeLanes, setActiveLanes] = useState<Set<number>>(new Set());
   const [displayState, setDisplayState] = useState({
     score: 0,
     combo: 0,
@@ -267,7 +268,6 @@ function GamePlay({
   const gameStartedRef = useRef(false);
 
   const beatmap = song.beatmaps[difficulty];
-  const totalLanesWidth = LANE_WIDTH * 4;
 
   // Initialize notes with color assignments
   useEffect(() => {
@@ -474,8 +474,11 @@ function GamePlay({
       canvas.height = h * dpr;
       ctx.scale(dpr, dpr);
 
-      const laneOffset = (w - totalLanesWidth) / 2;
-      const hitZoneY = h - 110;
+      const isMobile = w < 768;
+      const laneW = isMobile ? Math.floor(w / 4) : LANE_WIDTH;
+      const totalLW = laneW * 4;
+      const laneOffset = (w - totalLW) / 2;
+      const hitZoneY = isMobile ? h - 150 : h - 110;
 
       // Clear with gradient background
       const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
@@ -487,7 +490,7 @@ function GamePlay({
 
       // Draw lane backgrounds with subtle gradient
       for (let i = 0; i < 4; i++) {
-        const x = laneOffset + i * LANE_WIDTH;
+        const x = laneOffset + i * laneW;
         const isKeyDown = keysDownRef.current.has(i);
 
         const laneGrad = ctx.createLinearGradient(0, 0, 0, h);
@@ -501,7 +504,7 @@ function GamePlay({
           laneGrad.addColorStop(1, '#00000008');
         }
         ctx.fillStyle = laneGrad;
-        ctx.fillRect(x, 0, LANE_WIDTH, h);
+        ctx.fillRect(x, 0, laneW, h);
 
         // Lane divider (subtle)
         if (i > 0) {
@@ -519,29 +522,29 @@ function GamePlay({
       // Lane borders
       ctx.strokeStyle = '#0000000A';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(laneOffset, 0, totalLanesWidth, h);
+      ctx.strokeRect(laneOffset, 0, totalLW, h);
 
       // Draw hit zone - a glowing bar
       const hitBarY = hitZoneY + NOTE_HEIGHT / 2;
       for (let i = 0; i < 4; i++) {
-        const x = laneOffset + i * LANE_WIDTH;
+        const x = laneOffset + i * laneW;
         const isKeyDown = keysDownRef.current.has(i);
 
         // Hit zone glow
         if (isKeyDown) {
           const glowGrad = ctx.createRadialGradient(
-            x + LANE_WIDTH / 2, hitBarY, 5,
-            x + LANE_WIDTH / 2, hitBarY, 50
+            x + laneW / 2, hitBarY, 5,
+            x + laneW / 2, hitBarY, 50
           );
           glowGrad.addColorStop(0, LANE_BASE_COLORS[i] + '30');
           glowGrad.addColorStop(1, LANE_BASE_COLORS[i] + '00');
           ctx.fillStyle = glowGrad;
-          ctx.fillRect(x - 10, hitBarY - 50, LANE_WIDTH + 20, 100);
+          ctx.fillRect(x - 10, hitBarY - 50, laneW + 20, 100);
         }
       }
 
       // Hit zone line (main)
-      const hitLineGrad = ctx.createLinearGradient(laneOffset, 0, laneOffset + totalLanesWidth, 0);
+      const hitLineGrad = ctx.createLinearGradient(laneOffset, 0, laneOffset + totalLW, 0);
       hitLineGrad.addColorStop(0, '#FF6B9D40');
       hitLineGrad.addColorStop(0.25, '#FFB34740');
       hitLineGrad.addColorStop(0.5, '#7ED32140');
@@ -551,19 +554,42 @@ function GamePlay({
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(laneOffset, hitZoneY + NOTE_HEIGHT + 2);
-      ctx.lineTo(laneOffset + totalLanesWidth, hitZoneY + NOTE_HEIGHT + 2);
+      ctx.lineTo(laneOffset + totalLW, hitZoneY + NOTE_HEIGHT + 2);
       ctx.stroke();
 
-      // Draw key labels at hit zone
+      // Mobile: draw touch zone indicator below hit zone
+      if (isMobile) {
+        const touchZoneGrad = ctx.createLinearGradient(0, hitZoneY + NOTE_HEIGHT + 10, 0, h);
+        touchZoneGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        touchZoneGrad.addColorStop(0.3, 'rgba(0,0,0,0.02)');
+        touchZoneGrad.addColorStop(1, 'rgba(0,0,0,0.04)');
+        ctx.fillStyle = touchZoneGrad;
+        ctx.fillRect(laneOffset, hitZoneY + NOTE_HEIGHT + 10, totalLW, h - hitZoneY - NOTE_HEIGHT - 10);
+
+        // Draw lane-colored touch indicators
+        for (let i = 0; i < 4; i++) {
+          const x = laneOffset + i * laneW;
+          const isKeyDown = keysDownRef.current.has(i);
+          const indicatorY = hitZoneY + NOTE_HEIGHT + 20;
+          const indicatorH = 8;
+          ctx.fillStyle = isKeyDown ? LANE_BASE_COLORS[i] + '60' : LANE_BASE_COLORS[i] + '25';
+          ctx.beginPath();
+          ctx.roundRect(x + 8, indicatorY, laneW - 16, indicatorH, 4);
+          ctx.fill();
+        }
+      }
+
+      // Draw key labels at hit zone (desktop only - mobile uses touch buttons)
+      if (!isMobile) {
       for (let i = 0; i < 4; i++) {
-        const x = laneOffset + i * LANE_WIDTH;
+        const x = laneOffset + i * laneW;
         const isKeyDown = keysDownRef.current.has(i);
-        const cx = x + LANE_WIDTH / 2;
+        const cx = x + laneW / 2;
 
         // Key button
         const btnY = hitZoneY + 28;
         const btnH = 40;
-        const btnW = LANE_WIDTH - 20;
+        const btnW = laneW - 20;
         const btnX = x + 10;
 
         // Button shadow
@@ -602,6 +628,7 @@ function GamePlay({
         ctx.textBaseline = 'middle';
         ctx.fillText(LANE_KEYS[i], cx, btnY + btnH / 2);
       }
+      }
 
       // Draw notes
       let allNotesProcessed = true;
@@ -639,9 +666,9 @@ function GamePlay({
 
         allNotesProcessed = false;
 
-        const x = laneOffset + note.lane * LANE_WIDTH;
+        const x = laneOffset + note.lane * laneW;
         const noteX = x + NOTE_GAP;
-        const noteW = LANE_WIDTH - NOTE_GAP * 2;
+        const noteW = laneW - NOTE_GAP * 2;
         const palette = NOTE_PALETTES[note.colorIdx];
 
         // Note glow effect (when close to hit zone)
@@ -690,7 +717,7 @@ function GamePlay({
         const age = now - effect.time;
         if (age > 700) return false;
 
-        const x = laneOffset + effect.lane * LANE_WIDTH + LANE_WIDTH / 2;
+        const x = laneOffset + effect.lane * laneW + laneW / 2;
         const y = hitZoneY;
         const alpha = Math.max(0, 1 - age / 700);
 
@@ -699,7 +726,7 @@ function GamePlay({
           ctx.save();
           ctx.globalAlpha = alpha * 0.4;
           ctx.fillStyle = '#FF3B30';
-          ctx.fillRect(laneOffset + effect.lane * LANE_WIDTH, hitZoneY - 15, LANE_WIDTH, NOTE_HEIGHT + 30);
+          ctx.fillRect(laneOffset + effect.lane * laneW, hitZoneY - 15, laneW, NOTE_HEIGHT + 30);
           ctx.restore();
 
           ctx.fillStyle = `rgba(255, 59, 48, ${alpha})`;
@@ -761,6 +788,7 @@ function GamePlay({
           combo: gameStateRef.current.combo,
           missCount: gameStateRef.current.missCount,
         });
+        setActiveLanes(new Set(keysDownRef.current));
       }
 
       if (allNotesProcessed && currentTime > 5000) {
@@ -856,19 +884,31 @@ function GamePlay({
     <div ref={containerRef} className="relative w-full h-screen bg-white overflow-hidden select-none">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
-      {/* Touch buttons for mobile */}
-      <div className="absolute bottom-0 left-0 right-0 flex md:hidden z-10" style={{ height: '140px' }}>
-        {[0, 1, 2, 3].map((i) => (
-          <button
-            key={i}
-            onTouchStart={handleTouchStart(i)}
-            onTouchEnd={handleTouchEnd(i)}
-            className="flex-1 flex items-center justify-center font-bold text-lg active:opacity-50 transition-opacity"
-            style={{ color: LANE_BASE_COLORS[i] + '60' }}
-          >
-            {LANE_KEYS[i]}
-          </button>
-        ))}
+      {/* Touch buttons for mobile - prominent colored buttons */}
+      <div className="absolute bottom-0 left-0 right-0 flex md:hidden z-10 gap-1 px-1 pb-[env(safe-area-inset-bottom,8px)] pt-1"
+           style={{ height: '120px' }}>
+        {[0, 1, 2, 3].map((i) => {
+          const isActive = activeLanes.has(i);
+          return (
+            <button
+              key={i}
+              onTouchStart={handleTouchStart(i)}
+              onTouchEnd={handleTouchEnd(i)}
+              onTouchCancel={handleTouchEnd(i)}
+              className="flex-1 flex flex-col items-center justify-center rounded-xl font-black text-white text-2xl transition-transform active:scale-95"
+              style={{
+                background: `linear-gradient(180deg, ${LANE_BASE_COLORS[i]}${isActive ? 'CC' : '80'}, ${LANE_BASE_COLORS[i]}${isActive ? '99' : '60'})`,
+                border: `2px solid ${LANE_BASE_COLORS[i]}50`,
+                textShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                minHeight: '100px',
+                transform: isActive ? 'scale(0.95)' : 'scale(1)',
+              }}
+            >
+              <span className="text-base font-bold opacity-60 mb-0.5">{LANE_KEYS[i]}</span>
+              <span className="text-2xl">♪</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* HUD Overlay */}
