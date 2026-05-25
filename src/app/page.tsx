@@ -119,7 +119,7 @@ function StartScreen({
             WebkitTextFillColor: 'transparent',
           }}
         >
-          ♪ 节拍律动
+          ♪ GBC节拍律动
         </h1>
         <p className="text-gray-400 text-sm tracking-[0.3em] mt-2">RHYTHM GAME</p>
         {/* Cover image below title */}
