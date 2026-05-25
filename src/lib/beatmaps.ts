@@ -331,4 +331,18 @@ export const songs: SongInfo[] = [
       hard: generateBeats(145, 242, 'hard'),
     },
   },
+  {
+    id: 'song6',
+    title: '空の箱',
+    artist: 'トゲナシトゲアリ',
+    audioSrc: '/audio/song6.ogg',
+    duration: 81,
+    bpm: 175,
+    coverColor: '#7C4DFF',
+    beatmaps: {
+      easy: generateBeats(175, 81, 'easy'),
+      medium: generateBeats(175, 81, 'medium'),
+      hard: generateBeats(175, 81, 'hard'),
+    },
+  },
 ];
