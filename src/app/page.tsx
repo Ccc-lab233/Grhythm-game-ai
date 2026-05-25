@@ -55,9 +55,9 @@ const LANE_KEYS = ['A', 'S', 'D', 'F'];
 const KEY_CODES = ['KeyA', 'KeyS', 'KeyD', 'KeyF'];
 
 const TIMING_WINDOWS = {
-  perfect: 55,
-  great: 110,
-  good: 160,
+  perfect: 70,
+  great: 140,
+  good: 200,
 };
 
 const SCORE_VALUES = {
@@ -67,7 +67,7 @@ const SCORE_VALUES = {
   miss: 0,
 };
 
-const NOTE_TRAVEL_TIME = 1800; // ms for a note to travel from top to hit zone
+const NOTE_TRAVEL_TIME = 2500; // ms for a note to travel from top to hit zone (slowed down)
 const LANE_WIDTH = 88;
 const NOTE_HEIGHT = 22;
 const NOTE_GAP = 5;
@@ -122,12 +122,21 @@ function StartScreen({
           ♪ 节拍律动
         </h1>
         <p className="text-gray-400 text-sm tracking-[0.3em] mt-2">RHYTHM GAME</p>
+        {/* Cover image below title */}
+        <div className="mt-4 mb-2">
+          <img
+            src="/cover-image.png"
+            alt="cover"
+            className="w-32 h-28 sm:w-40 sm:h-32 object-cover rounded-2xl shadow-lg mx-auto"
+            style={{ border: '2px solid rgba(255,107,157,0.2)' }}
+          />
+        </div>
       </div>
 
       {/* Song Selection */}
       <div className="w-full max-w-md mb-8">
         <h2 className="text-lg font-semibold text-gray-700 mb-3 text-center">选择曲目</h2>
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-64 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: '#ddd transparent' }}>
           {songs.map((song) => (
             <button
               key={song.id}
@@ -1054,9 +1063,37 @@ function ResultScreen({
         </div>
       </div>
 
-      {/* Result status - always show completion */}
-      <div className="mb-6 px-6 py-3 bg-green-50/80 rounded-2xl border border-green-100/50">
-        <p className="text-green-500 font-bold text-lg">🎉 演奏完成！</p>
+      {/* Cyber-rock completion message */}
+      <div className="mb-6 relative">
+        <div
+          className="px-8 py-4 rounded-2xl relative overflow-hidden"
+          style={{
+            background: 'linear-gradient(135deg, #0D0D0D, #1A1A2E, #16213E)',
+            border: '2px solid',
+            borderImage: 'linear-gradient(135deg, #FF6B9D, #E040FB, #4DD0E1, #FFB347) 1',
+            boxShadow: '0 0 30px rgba(224,64,251,0.3), 0 0 60px rgba(77,208,225,0.15), inset 0 0 30px rgba(255,107,157,0.1)',
+          }}
+        >
+          {/* Neon scanline effect */}
+          <div className="absolute inset-0 opacity-10" style={{ background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,107,157,0.3) 2px, rgba(255,107,157,0.3) 4px)' }} />
+          <p
+            className="text-2xl sm:text-3xl font-black tracking-wider text-center relative z-10"
+            style={{
+              background: 'linear-gradient(90deg, #FF6B9D, #E040FB, #4DD0E1, #FFB347, #FF6B9D)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              animation: 'shine 3s linear infinite',
+              textShadow: '0 0 20px rgba(224,64,251,0.5)',
+              filter: 'drop-shadow(0 0 10px rgba(77,208,225,0.4))',
+            }}
+          >
+            一起竖起小指吧！
+          </p>
+          <p className="text-center text-xs mt-1 tracking-[0.2em] relative z-10" style={{ color: '#4DD0E1', opacity: 0.7, textShadow: '0 0 8px rgba(77,208,225,0.5)' }}>
+            ☆ PINKY PROMISE ☆
+          </p>
+        </div>
       </div>
 
       {/* Buttons */}

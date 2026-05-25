@@ -19,7 +19,8 @@ export interface SongInfo {
   beatmaps: Record<Difficulty, NoteData[]>;
 }
 
-// Generate beat patterns based on BPM
+// Generate beat patterns based on BPM - EASIER version
+// Reduced note count, more breathing room, slower feel
 function generateBeats(
   bpm: number,
   durationSec: number,
@@ -32,36 +33,29 @@ function generateBeats(
 
   // Start after a 3-second lead-in
   const startTime = 3000;
-  const endTime = durationSec * 1000 - 2000; // End 2s before clip ends
+  const endTime = durationSec * 1000 - 3000; // End 3s before clip ends
 
   // Define pattern templates for each difficulty
-  // Patterns are defined as offsets from measure start and lane assignments
   type Pattern = Array<{ offset: number; lane: number }>;
 
-  // Easy patterns: simple quarter notes, mostly single lane per beat
+  // Easy patterns: simple half notes and quarter notes, lots of rest
   const easyPatterns: Pattern[] = [
-    // Pattern 0: Basic quarter notes alternating
+    // Pattern 0: Simple alternating (2 notes per measure)
     [
       { offset: 0, lane: 1 },
-      { offset: beatInterval, lane: 2 },
-      { offset: beatInterval * 2, lane: 1 },
-      { offset: beatInterval * 3, lane: 2 },
+      { offset: beatInterval * 2, lane: 2 },
     ],
-    // Pattern 1: Left hand focus
+    // Pattern 1: Left hand
     [
       { offset: 0, lane: 0 },
-      { offset: beatInterval, lane: 1 },
-      { offset: beatInterval * 2, lane: 0 },
-      { offset: beatInterval * 3, lane: 1 },
+      { offset: beatInterval * 2, lane: 1 },
     ],
-    // Pattern 2: Right hand focus
+    // Pattern 2: Right hand
     [
       { offset: 0, lane: 2 },
-      { offset: beatInterval, lane: 3 },
-      { offset: beatInterval * 2, lane: 2 },
-      { offset: beatInterval * 3, lane: 3 },
+      { offset: beatInterval * 2, lane: 3 },
     ],
-    // Pattern 3: Walk across
+    // Pattern 3: Walk across (slow)
     [
       { offset: 0, lane: 0 },
       { offset: beatInterval, lane: 1 },
@@ -75,16 +69,74 @@ function generateBeats(
       { offset: beatInterval * 2, lane: 1 },
       { offset: beatInterval * 3, lane: 0 },
     ],
-    // Pattern 5: Half notes (simpler)
+    // Pattern 5: Single notes (very easy)
     [
       { offset: 0, lane: 1 },
-      { offset: beatInterval * 2, lane: 2 },
+      { offset: beatInterval * 3, lane: 2 },
+    ],
+    // Pattern 6: Gentle bounce
+    [
+      { offset: 0, lane: 1 },
+      { offset: beatInterval, lane: 2 },
+      { offset: beatInterval * 2, lane: 1 },
     ],
   ];
 
-  // Medium patterns: eighth notes, more variation
+  // Medium patterns: quarter notes with occasional eighth notes
   const mediumPatterns: Pattern[] = [
-    // Pattern 0: Eighth note runs
+    // Pattern 0: Quarter note walk
+    [
+      { offset: 0, lane: 0 },
+      { offset: beatInterval, lane: 1 },
+      { offset: beatInterval * 2, lane: 2 },
+      { offset: beatInterval * 3, lane: 3 },
+    ],
+    // Pattern 1: Alternating pairs
+    [
+      { offset: 0, lane: 1 },
+      { offset: beatInterval, lane: 2 },
+      { offset: beatInterval * 2, lane: 1 },
+      { offset: beatInterval * 3, lane: 2 },
+    ],
+    // Pattern 2: Left-right
+    [
+      { offset: 0, lane: 0 },
+      { offset: beatInterval, lane: 3 },
+      { offset: beatInterval * 2, lane: 1 },
+      { offset: beatInterval * 3, lane: 2 },
+    ],
+    // Pattern 3: Eighth note pair
+    [
+      { offset: 0, lane: 1 },
+      { offset: halfBeat, lane: 2 },
+      { offset: beatInterval * 2, lane: 0 },
+      { offset: beatInterval * 3, lane: 3 },
+    ],
+    // Pattern 4: Zigzag
+    [
+      { offset: 0, lane: 0 },
+      { offset: beatInterval, lane: 2 },
+      { offset: beatInterval * 2, lane: 1 },
+      { offset: beatInterval * 3, lane: 3 },
+    ],
+    // Pattern 5: Gentle rhythm
+    [
+      { offset: 0, lane: 1 },
+      { offset: halfBeat, lane: 2 },
+      { offset: beatInterval * 2, lane: 1 },
+      { offset: beatInterval * 2 + halfBeat, lane: 0 },
+    ],
+    // Pattern 6: Breathing rhythm
+    [
+      { offset: 0, lane: 2 },
+      { offset: beatInterval, lane: 1 },
+      { offset: beatInterval * 3, lane: 3 },
+    ],
+  ];
+
+  // Hard patterns: eighth notes, some sixteenth note pairs, but still manageable
+  const hardPatterns: Pattern[] = [
+    // Pattern 0: Eighth note staircase
     [
       { offset: 0, lane: 0 },
       { offset: halfBeat, lane: 1 },
@@ -95,166 +147,58 @@ function generateBeats(
       { offset: beatInterval * 3, lane: 0 },
       { offset: halfBeat + beatInterval * 3, lane: 1 },
     ],
-    // Pattern 1: Syncopated
+    // Pattern 1: Quarter with eighth bursts
     [
       { offset: 0, lane: 1 },
-      { offset: halfBeat, lane: 2 },
-      { offset: beatInterval, lane: 1 },
-      { offset: beatInterval + halfBeat * 1.5, lane: 3 },
+      { offset: beatInterval, lane: 2 },
+      { offset: halfBeat + beatInterval, lane: 3 },
       { offset: beatInterval * 2, lane: 0 },
-      { offset: beatInterval * 2 + halfBeat, lane: 2 },
-      { offset: beatInterval * 3, lane: 3 },
-      { offset: beatInterval * 3 + halfBeat, lane: 1 },
+      { offset: beatInterval * 3, lane: 1 },
+      { offset: halfBeat + beatInterval * 3, lane: 2 },
     ],
-    // Pattern 2: Alternating doubles
+    // Pattern 2: Double taps
     [
       { offset: 0, lane: 0 },
       { offset: 0, lane: 3 },
-      { offset: beatInterval, lane: 1 },
-      { offset: beatInterval, lane: 2 },
-      { offset: beatInterval * 2, lane: 0 },
-      { offset: beatInterval * 2, lane: 3 },
-      { offset: beatInterval * 3, lane: 1 },
-      { offset: beatInterval * 3, lane: 2 },
-    ],
-    // Pattern 3: Staircase eighth notes
-    [
-      { offset: 0, lane: 0 },
-      { offset: halfBeat, lane: 1 },
-      { offset: beatInterval, lane: 2 },
-      { offset: halfBeat + beatInterval, lane: 3 },
-      { offset: beatInterval * 2, lane: 3 },
-      { offset: halfBeat + beatInterval * 2, lane: 2 },
-      { offset: beatInterval * 3, lane: 1 },
-      { offset: halfBeat + beatInterval * 3, lane: 0 },
-    ],
-    // Pattern 4: Quarter notes with off-beat
-    [
-      { offset: 0, lane: 1 },
-      { offset: halfBeat, lane: 2 },
-      { offset: beatInterval * 2, lane: 0 },
-      { offset: beatInterval * 2 + halfBeat, lane: 3 },
-    ],
-    // Pattern 5: Mixed rhythm
-    [
-      { offset: 0, lane: 2 },
-      { offset: beatInterval, lane: 0 },
-      { offset: beatInterval + halfBeat, lane: 1 },
-      { offset: beatInterval * 2, lane: 3 },
-      { offset: beatInterval * 3, lane: 2 },
-      { offset: beatInterval * 3 + halfBeat, lane: 0 },
-    ],
-  ];
-
-  // Hard patterns: sixteenth notes, complex combinations
-  const hardPatterns: Pattern[] = [
-    // Pattern 0: Sixteenth note stream
-    [
-      { offset: 0, lane: 0 },
-      { offset: quarterBeat, lane: 1 },
-      { offset: quarterBeat * 2, lane: 2 },
-      { offset: quarterBeat * 3, lane: 3 },
-      { offset: beatInterval, lane: 3 },
-      { offset: beatInterval + quarterBeat, lane: 2 },
-      { offset: beatInterval + quarterBeat * 2, lane: 1 },
-      { offset: beatInterval + quarterBeat * 3, lane: 0 },
-      { offset: beatInterval * 2, lane: 0 },
-      { offset: beatInterval * 2 + quarterBeat, lane: 2 },
-      { offset: beatInterval * 2 + quarterBeat * 2, lane: 1 },
-      { offset: beatInterval * 2 + quarterBeat * 3, lane: 3 },
-      { offset: beatInterval * 3, lane: 1 },
-      { offset: beatInterval * 3 + quarterBeat, lane: 0 },
-      { offset: beatInterval * 3 + quarterBeat * 2, lane: 3 },
-      { offset: beatInterval * 3 + quarterBeat * 3, lane: 2 },
-    ],
-    // Pattern 1: Double note patterns
-    [
-      { offset: 0, lane: 0 },
-      { offset: 0, lane: 3 },
-      { offset: halfBeat, lane: 1 },
-      { offset: halfBeat, lane: 2 },
-      { offset: beatInterval, lane: 0 },
-      { offset: beatInterval, lane: 2 },
-      { offset: halfBeat + beatInterval, lane: 1 },
-      { offset: halfBeat + beatInterval, lane: 3 },
-      { offset: beatInterval * 2, lane: 0 },
       { offset: beatInterval * 2, lane: 1 },
-      { offset: halfBeat + beatInterval * 2, lane: 2 },
-      { offset: halfBeat + beatInterval * 2, lane: 3 },
-      { offset: beatInterval * 3, lane: 1 },
-      { offset: beatInterval * 3, lane: 2 },
-      { offset: halfBeat + beatInterval * 3, lane: 0 },
+      { offset: beatInterval * 2, lane: 2 },
+      { offset: beatInterval * 3, lane: 0 },
       { offset: halfBeat + beatInterval * 3, lane: 3 },
     ],
-    // Pattern 2: Fast alternating
+    // Pattern 3: Syncopated
+    [
+      { offset: 0, lane: 2 },
+      { offset: halfBeat, lane: 1 },
+      { offset: beatInterval, lane: 0 },
+      { offset: beatInterval * 2, lane: 3 },
+      { offset: halfBeat + beatInterval * 2, lane: 2 },
+      { offset: beatInterval * 3, lane: 1 },
+    ],
+    // Pattern 4: Mixed rhythm
+    [
+      { offset: 0, lane: 1 },
+      { offset: quarterBeat, lane: 2 },
+      { offset: halfBeat, lane: 3 },
+      { offset: beatInterval * 2, lane: 0 },
+      { offset: halfBeat + beatInterval * 2, lane: 1 },
+      { offset: beatInterval * 3, lane: 2 },
+      { offset: halfBeat + beatInterval * 3, lane: 3 },
+    ],
+    // Pattern 5: Breathing hard
+    [
+      { offset: 0, lane: 0 },
+      { offset: halfBeat, lane: 1 },
+      { offset: beatInterval * 2, lane: 3 },
+      { offset: halfBeat + beatInterval * 2, lane: 2 },
+      { offset: beatInterval * 3, lane: 1 },
+    ],
+    // Pattern 6: Quick burst then rest
     [
       { offset: 0, lane: 1 },
       { offset: quarterBeat, lane: 2 },
       { offset: halfBeat, lane: 1 },
-      { offset: quarterBeat * 3, lane: 2 },
-      { offset: beatInterval, lane: 0 },
-      { offset: beatInterval + quarterBeat, lane: 3 },
-      { offset: beatInterval + halfBeat, lane: 0 },
-      { offset: beatInterval + quarterBeat * 3, lane: 3 },
-      { offset: beatInterval * 2, lane: 1 },
-      { offset: beatInterval * 2 + quarterBeat, lane: 2 },
-      { offset: beatInterval * 2 + halfBeat, lane: 1 },
-      { offset: beatInterval * 2 + quarterBeat * 3, lane: 2 },
+      { offset: beatInterval * 2, lane: 3 },
       { offset: beatInterval * 3, lane: 0 },
-      { offset: beatInterval * 3 + quarterBeat, lane: 3 },
-      { offset: beatInterval * 3 + halfBeat, lane: 0 },
-      { offset: beatInterval * 3 + quarterBeat * 3, lane: 3 },
-    ],
-    // Pattern 3: Mixed complexity
-    [
-      { offset: 0, lane: 2 },
-      { offset: halfBeat, lane: 0 },
-      { offset: halfBeat, lane: 3 },
-      { offset: beatInterval, lane: 1 },
-      { offset: beatInterval + quarterBeat, lane: 2 },
-      { offset: beatInterval + halfBeat, lane: 0 },
-      { offset: beatInterval + quarterBeat * 3, lane: 3 },
-      { offset: beatInterval * 2, lane: 1 },
-      { offset: beatInterval * 2, lane: 2 },
-      { offset: beatInterval * 2 + halfBeat, lane: 0 },
-      { offset: beatInterval * 2 + halfBeat, lane: 3 },
-      { offset: beatInterval * 3, lane: 1 },
-      { offset: beatInterval * 3 + quarterBeat, lane: 2 },
-      { offset: beatInterval * 3 + quarterBeat * 2, lane: 1 },
-      { offset: beatInterval * 3 + quarterBeat * 3, lane: 0 },
-    ],
-    // Pattern 4: Jump patterns
-    [
-      { offset: 0, lane: 0 },
-      { offset: 0, lane: 1 },
-      { offset: beatInterval, lane: 2 },
-      { offset: beatInterval, lane: 3 },
-      { offset: beatInterval + halfBeat, lane: 0 },
-      { offset: beatInterval + halfBeat, lane: 3 },
-      { offset: beatInterval * 2, lane: 1 },
-      { offset: beatInterval * 2, lane: 2 },
-      { offset: beatInterval * 2 + halfBeat, lane: 0 },
-      { offset: beatInterval * 2 + halfBeat, lane: 1 },
-      { offset: beatInterval * 3, lane: 2 },
-      { offset: beatInterval * 3, lane: 3 },
-      { offset: beatInterval * 3 + halfBeat, lane: 1 },
-      { offset: beatInterval * 3 + halfBeat, lane: 2 },
-    ],
-    // Pattern 5: Grace notes
-    [
-      { offset: 0, lane: 1 },
-      { offset: quarterBeat, lane: 2 },
-      { offset: halfBeat, lane: 3 },
-      { offset: beatInterval, lane: 0 },
-      { offset: beatInterval + halfBeat, lane: 2 },
-      { offset: beatInterval * 2, lane: 1 },
-      { offset: beatInterval * 2 + quarterBeat, lane: 3 },
-      { offset: beatInterval * 2 + halfBeat, lane: 0 },
-      { offset: beatInterval * 2 + quarterBeat * 3, lane: 2 },
-      { offset: beatInterval * 3, lane: 1 },
-      { offset: beatInterval * 3 + quarterBeat, lane: 0 },
-      { offset: beatInterval * 3 + halfBeat, lane: 3 },
-      { offset: beatInterval * 3 + quarterBeat * 3, lane: 1 },
     ],
   ];
 
@@ -283,13 +227,22 @@ function generateBeats(
     currentTime += measureLength;
     patternIndex++;
 
-    // Add some variation - occasionally skip a measure for breathing room
-    if (difficulty === 'easy' && patternIndex % 4 === 3) {
-      // Skip every 4th measure on easy
-      currentTime += measureLength;
-    } else if (difficulty === 'medium' && patternIndex % 6 === 5) {
-      // Skip every 6th measure on medium
-      currentTime += measureLength * 0.5;
+    // Add breathing room - skip measures periodically
+    if (difficulty === 'easy') {
+      // Skip every 3rd measure on easy for more rest
+      if (patternIndex % 3 === 2) {
+        currentTime += measureLength;
+      }
+    } else if (difficulty === 'medium') {
+      // Skip every 4th measure on medium
+      if (patternIndex % 4 === 3) {
+        currentTime += measureLength * 0.5;
+      }
+    } else {
+      // Hard: skip every 5th measure
+      if (patternIndex % 5 === 4) {
+        currentTime += measureLength * 0.5;
+      }
     }
   }
 
@@ -299,41 +252,83 @@ function generateBeats(
   // Remove any duplicate notes (same time and lane)
   const seen = new Set<string>();
   return notes.filter((note) => {
-    const key = `${note.time}-${note.lane}`;
+    const key = `${Math.round(note.time)}-${note.lane}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-// Song definitions
+// Song definitions - 5 songs, full versions
 export const songs: SongInfo[] = [
   {
     id: 'song1',
     title: '东京不太热',
     artist: '封茗囧菌',
     audioSrc: '/audio/song1.ogg',
-    duration: 62,
+    duration: 225,
     bpm: 130,
     coverColor: '#FF6B9D',
     beatmaps: {
-      easy: generateBeats(130, 62, 'easy'),
-      medium: generateBeats(130, 62, 'medium'),
-      hard: generateBeats(130, 62, 'hard'),
+      easy: generateBeats(130, 225, 'easy'),
+      medium: generateBeats(130, 225, 'medium'),
+      hard: generateBeats(130, 225, 'hard'),
     },
   },
   {
     id: 'song2',
-    title: '绊',
-    artist: 'NanNan--',
+    title: '小宇',
+    artist: 'ZLY',
     audioSrc: '/audio/song2.ogg',
-    duration: 62,
-    bpm: 120,
-    coverColor: '#7C4DFF',
+    duration: 267,
+    bpm: 85,
+    coverColor: '#4DD0E1',
     beatmaps: {
-      easy: generateBeats(120, 62, 'easy'),
-      medium: generateBeats(120, 62, 'medium'),
-      hard: generateBeats(120, 62, 'hard'),
+      easy: generateBeats(85, 267, 'easy'),
+      medium: generateBeats(85, 267, 'medium'),
+      hard: generateBeats(85, 267, 'hard'),
+    },
+  },
+  {
+    id: 'song3',
+    title: '幹物女(喂喂）',
+    artist: '养只正太嘛',
+    audioSrc: '/audio/song3.ogg',
+    duration: 254,
+    bpm: 140,
+    coverColor: '#FFB347',
+    beatmaps: {
+      easy: generateBeats(140, 254, 'easy'),
+      medium: generateBeats(140, 254, 'medium'),
+      hard: generateBeats(140, 254, 'hard'),
+    },
+  },
+  {
+    id: 'song4',
+    title: 'Moshi Moshi',
+    artist: 'Nozomi Kitay / Gal D / 百足',
+    audioSrc: '/audio/song4.ogg',
+    duration: 177,
+    bpm: 128,
+    coverColor: '#AED581',
+    beatmaps: {
+      easy: generateBeats(128, 177, 'easy'),
+      medium: generateBeats(128, 177, 'medium'),
+      hard: generateBeats(128, 177, 'hard'),
+    },
+  },
+  {
+    id: 'song5',
+    title: '言って。（说吧。）',
+    artist: 'ヨルシカ',
+    audioSrc: '/audio/song5.ogg',
+    duration: 242,
+    bpm: 145,
+    coverColor: '#E040FB',
+    beatmaps: {
+      easy: generateBeats(145, 242, 'easy'),
+      medium: generateBeats(145, 242, 'medium'),
+      hard: generateBeats(145, 242, 'hard'),
     },
   },
 ];
