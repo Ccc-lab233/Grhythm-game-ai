@@ -235,10 +235,12 @@ function GamePlay({
   song,
   difficulty,
   onEnd,
+  onQuit,
 }: {
   song: SongInfo;
   difficulty: Difficulty;
   onEnd: (state: Omit<GameState, 'screen' | 'selectedSong' | 'selectedDifficulty' | 'isPaused'>) => void;
+  onQuit: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -275,6 +277,10 @@ function GamePlay({
   const [countdown, setCountdown] = useState(3);
   const [playing, setPlaying] = useState(false);
   const gameStartedRef = useRef(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [resumeCountdown, setResumeCountdown] = useState(0);
+  const pausedAtRef = useRef(0); // timestamp when paused
+  const totalPausedRef = useRef(0); // total ms spent paused
 
   const beatmap = song.beatmaps[difficulty];
 
@@ -365,16 +371,62 @@ function GamePlay({
     return () => clearTimeout(timer);
   }, [countdown, song.audioSrc]);
 
+  // Handle pause
+  const handlePause = useCallback(() => {
+    if (!gameStartedRef.current || gameStateRef.current.gameEnded) return;
+    if (isPaused) return;
+    setIsPaused(true);
+    pausedAtRef.current = performance.now();
+    if (audioRef.current) audioRef.current.pause();
+  }, [isPaused]);
+
+  // Handle resume (starts 3-second countdown)
+  const handleResume = useCallback(() => {
+    setResumeCountdown(3);
+  }, []);
+
+  // Resume countdown effect
+  useEffect(() => {
+    if (resumeCountdown <= 0) return;
+    let timer: NodeJS.Timeout;
+    if (resumeCountdown > 1) {
+      timer = setTimeout(() => setResumeCountdown(resumeCountdown - 1), 1000);
+    } else {
+      // Countdown reached 0, actually resume
+      timer = setTimeout(() => {
+        const pauseDuration = performance.now() - pausedAtRef.current;
+        totalPausedRef.current += pauseDuration;
+        // Adjust startTime to account for paused duration
+        gameStateRef.current.startTime += pauseDuration;
+        if (audioRef.current) audioRef.current.play().catch(console.error);
+        setIsPaused(false);
+        setResumeCountdown(0);
+      }, 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [resumeCountdown]);
+
   // Key handlers
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape key toggles pause
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        if (isPaused) {
+          handleResume();
+        } else {
+          handlePause();
+        }
+        return;
+      }
+
       const laneIndex = KEY_CODES.indexOf(e.code);
       if (laneIndex === -1) return;
       e.preventDefault();
       if (keysDownRef.current.has(laneIndex)) return;
       keysDownRef.current.add(laneIndex);
 
-      if (!gameStartedRef.current) return;
+      if (!gameStartedRef.current || isPaused) return;
 
       const currentTime = performance.now() - gameStateRef.current.startTime;
       let closestNoteIdx = -1;
@@ -439,7 +491,7 @@ function GamePlay({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [playHitSound]);
+  }, [playHitSound, isPaused, handlePause, handleResume]);
 
   const triggerGameEnd = useCallback(() => {
     if (gameStateRef.current.gameEnded) return;
@@ -472,6 +524,7 @@ function GamePlay({
 
     const render = () => {
       if (gameStateRef.current.gameEnded) return;
+      if (isPaused) return; // Don't render when paused
 
       const currentTime = performance.now() - gameStateRef.current.startTime;
       const w = dimensions.width;
@@ -815,11 +868,12 @@ function GamePlay({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [playing, dimensions, triggerGameEnd, song.duration]);
+  }, [playing, dimensions, triggerGameEnd, song.duration, isPaused]);
 
   // Touch handlers
   const handleTouchStart = useCallback((laneIndex: number) => (e: React.TouchEvent) => {
     e.preventDefault();
+    if (isPaused) return;
     keysDownRef.current.add(laneIndex);
 
     if (!gameStartedRef.current) return;
@@ -873,7 +927,7 @@ function GamePlay({
         time: performance.now(),
       });
     }
-  }, [playHitSound]);
+  }, [playHitSound, isPaused]);
 
   const handleTouchEnd = useCallback((laneIndex: number) => () => {
     keysDownRef.current.delete(laneIndex);
@@ -952,14 +1006,24 @@ function GamePlay({
         </div>
       </div>
 
-      {/* Song info */}
-      <div className="absolute bottom-6 left-4 pointer-events-none z-10 bg-white/50 backdrop-blur-sm rounded-lg px-2.5 py-1">
-        <p className="text-xs font-semibold text-gray-600">{song.title}</p>
-        <p className="text-[10px] text-gray-400">{song.artist} · {difficulty === 'easy' ? '简单' : difficulty === 'medium' ? '中等' : '困难'}</p>
+      {/* Song info & pause button */}
+      <div className="absolute bottom-6 left-4 right-4 flex justify-between items-end z-10">
+        <div className="bg-white/50 backdrop-blur-sm rounded-lg px-2.5 py-1">
+          <p className="text-xs font-semibold text-gray-600">{song.title}</p>
+          <p className="text-[10px] text-gray-400">{song.artist} · {difficulty === 'easy' ? '简单' : difficulty === 'medium' ? '中等' : '困难'}</p>
+        </div>
+        {/* Pause button */}
+        <button
+          onClick={handlePause}
+          className="bg-white/70 backdrop-blur-sm rounded-xl px-3 py-2 text-gray-500 hover:text-gray-700 hover:bg-white/90 transition-all active:scale-95"
+          style={{ fontSize: '20px', lineHeight: 1 }}
+        >
+          ⏸
+        </button>
       </div>
 
-      {/* Countdown overlay */}
-      {countdown > 0 && (
+      {/* Countdown overlay (initial start) */}
+      {countdown > 0 && !isPaused && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/85 z-20">
           <div className="text-center">
             <p
@@ -973,6 +1037,62 @@ function GamePlay({
               {countdown}
             </p>
             <p className="text-lg text-gray-400 mt-3 font-medium">准备...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Pause overlay */}
+      {isPaused && resumeCountdown === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-30">
+          <div className="bg-white/95 backdrop-blur rounded-3xl shadow-2xl p-8 mx-4 max-w-sm w-full text-center">
+            <div
+              className="text-4xl font-black mb-2"
+              style={{
+                background: 'linear-gradient(135deg, #FF6B9D, #FFB347, #4DD0E1)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              ⏸ 暂停
+            </div>
+            <p className="text-gray-400 text-sm mb-8">按 ESC 或点击继续</p>
+
+            <div className="space-y-3">
+              <button
+                onClick={handleResume}
+                className="w-full py-3.5 rounded-xl font-bold text-white text-lg transition-all hover:shadow-lg hover:scale-[1.02] active:scale-95"
+                style={{ background: 'linear-gradient(135deg, #FF6B9D, #FFB347)' }}
+              >
+                ▶ 继续游戏
+              </button>
+              <button
+                onClick={onQuit}
+                className="w-full py-3.5 rounded-xl font-bold text-gray-500 text-lg transition-all hover:text-red-500 hover:bg-red-50 active:scale-95 bg-gray-100"
+              >
+                ✕ 退出游戏
+              </button>
+            </div>
+
+            <p className="text-gray-300 text-xs mt-5">按 ESC 键继续</p>
+          </div>
+        </div>
+      )}
+
+      {/* Resume countdown overlay */}
+      {isPaused && resumeCountdown > 0 && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-30">
+          <div className="text-center">
+            <p
+              className="text-8xl font-black animate-pulse"
+              style={{
+                background: 'linear-gradient(135deg, #FF6B9D, #7C4DFF)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              {resumeCountdown}
+            </p>
+            <p className="text-lg text-white/70 mt-3 font-medium">准备继续...</p>
           </div>
         </div>
       )}
@@ -1186,6 +1306,7 @@ export default function Home() {
           song={gameState.selectedSong}
           difficulty={gameState.selectedDifficulty}
           onEnd={handleGameEnd}
+          onQuit={() => setGameState(prev => ({ ...prev, screen: 'start' }))}
         />
       )}
 
