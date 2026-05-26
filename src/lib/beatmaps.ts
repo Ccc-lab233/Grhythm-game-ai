@@ -6,6 +6,7 @@ export type Difficulty = 'easy' | 'medium' | 'hard';
 export interface NoteData {
   time: number; // in milliseconds
   lane: number; // 0=A, 1=S, 2=D, 3=F
+  duration?: number; // >0 means hold note, duration in ms. undefined or 0 = tap note
 }
 
 export interface SongInfo {
@@ -251,12 +252,81 @@ function generateBeats(
 
   // Remove any duplicate notes (same time and lane)
   const seen = new Set<string>();
-  return notes.filter((note) => {
+  const deduped = notes.filter((note) => {
     const key = `${Math.round(note.time)}-${note.lane}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+
+  // Add hold notes by converting some tap notes
+  return addHoldNotes(deduped, bpm, difficulty);
+}
+
+// Post-processing: convert some tap notes into hold notes based on beat
+function addHoldNotes(notes: NoteData[], bpm: number, difficulty: Difficulty): NoteData[] {
+  const beatInterval = 60000 / bpm;
+  const result = notes.map(n => ({ ...n }));
+
+  let nth: number;
+  let durationBeats: number;
+  if (difficulty === 'easy') {
+    nth = 5;
+    durationBeats = 1;
+  } else if (difficulty === 'medium') {
+    nth = 4;
+    durationBeats = 1.5;
+  } else {
+    nth = 3;
+    durationBeats = 2;
+  }
+
+  const holdDuration = beatInterval * durationBeats;
+  const minGap = beatInterval * 2;
+
+  // Build sorted list of note times per lane for proximity checking
+  const laneNoteTimes: Map<number, number[]> = new Map();
+  for (const note of result) {
+    if (!laneNoteTimes.has(note.lane)) laneNoteTimes.set(note.lane, []);
+    laneNoteTimes.get(note.lane)!.push(note.time);
+  }
+  for (const times of laneNoteTimes.values()) {
+    times.sort((a, b) => a - b);
+  }
+
+  // Track last hold end time per lane to prevent overlaps
+  const lastHoldEndByLane: Map<number, number> = new Map();
+
+  for (let i = 0; i < result.length; i++) {
+    if ((i + 1) % nth !== 0) continue;
+
+    const note = result[i];
+    const holdEndTime = note.time + holdDuration;
+
+    // Check: previous note in same lane must be at least minGap away
+    const sameLaneTimes = laneNoteTimes.get(note.lane) ?? [];
+    const noteIdxInLane = sameLaneTimes.indexOf(note.time);
+    if (noteIdxInLane > 0) {
+      const prevTime = sameLaneTimes[noteIdxInLane - 1];
+      if (note.time - prevTime < minGap) continue;
+    }
+
+    // Check: next note in same lane must be at least minGap away from hold end
+    if (noteIdxInLane >= 0 && noteIdxInLane < sameLaneTimes.length - 1) {
+      const nextTime = sameLaneTimes[noteIdxInLane + 1];
+      if (nextTime < holdEndTime + minGap) continue;
+    }
+
+    // Check: no overlap with previous hold note in same lane
+    const lastHoldEnd = lastHoldEndByLane.get(note.lane) ?? -Infinity;
+    if (note.time < lastHoldEnd) continue;
+
+    // Convert to hold note
+    result[i] = { ...note, duration: holdDuration };
+    lastHoldEndByLane.set(note.lane, holdEndTime);
+  }
+
+  return result;
 }
 
 // Song definitions - 5 songs, full versions

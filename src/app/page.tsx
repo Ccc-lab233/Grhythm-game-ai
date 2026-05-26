@@ -25,6 +25,9 @@ interface ActiveNote extends NoteData {
   id: number;
   hit: boolean;
   missed: boolean;
+  holdStarted: boolean;  // for hold notes: player pressed the head
+  holdReleased: boolean;  // for hold notes: player released the key (completed or broken)
+  holdInitialScore: number; // initial hit score for hold note bonus calculation
   colorIdx: number;
 }
 
@@ -33,6 +36,7 @@ interface HitEffect {
   lane: number;
   type: 'perfect' | 'great' | 'good' | 'miss';
   time: number;
+  y?: number; // optional Y position for hold note tail effects
 }
 
 // ============ CONSTANTS ============
@@ -119,7 +123,7 @@ function StartScreen({
             WebkitTextFillColor: 'transparent',
           }}
         >
-          ♪ GBC节拍律动
+          ♪ GBC节拍律动（杂）
         </h1>
         <p className="text-gray-400 text-sm tracking-[0.3em] mt-2">RHYTHM GAME</p>
         {/* Cover image below title */}
@@ -223,7 +227,7 @@ function StartScreen({
           {['A', 'S', 'D', 'F'].map(k => (
             <span key={k} className="font-mono font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[11px]">{k}</span>
           ))}
-        </span> 键击打音符</p>
+        </span> 键击打音符，长按音符需按住不放</p>
         <p>尽情享受音乐吧</p>
       </div>
     </div>
@@ -291,6 +295,9 @@ function GamePlay({
       id: i,
       hit: false,
       missed: false,
+      holdStarted: false,
+      holdReleased: false,
+      holdInitialScore: 0,
       colorIdx: (i * 3 + note.lane * 7) % NOTE_PALETTES.length,
     }));
     notesRef.current = activeNotes;
@@ -406,6 +413,184 @@ function GamePlay({
     return () => clearTimeout(timer);
   }, [resumeCountdown]);
 
+  // Helper: find and hit a note in a lane on key down
+  const handleLanePress = useCallback((laneIndex: number) => {
+    if (!gameStartedRef.current || isPaused) return;
+
+    const currentTime = performance.now() - gameStateRef.current.startTime;
+    let closestNoteIdx = -1;
+    let closestDiff = Infinity;
+
+    const notes = notesRef.current;
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i];
+      if (note.hit || note.missed || note.holdReleased || note.holdStarted || note.lane !== laneIndex) continue;
+      const diff = Math.abs(note.time - currentTime);
+      if (diff < closestDiff && diff <= TIMING_WINDOWS.good) {
+        closestDiff = diff;
+        closestNoteIdx = i;
+      }
+    }
+
+    if (closestNoteIdx >= 0) {
+      const note = notes[closestNoteIdx];
+      const isHoldNote = !!(note.duration && note.duration > 0);
+
+      let hitType: 'perfect' | 'great' | 'good';
+      if (closestDiff <= TIMING_WINDOWS.perfect) {
+        hitType = 'perfect';
+        gameStateRef.current.perfectCount++;
+      } else if (closestDiff <= TIMING_WINDOWS.great) {
+        hitType = 'great';
+        gameStateRef.current.greatCount++;
+      } else {
+        hitType = 'good';
+        gameStateRef.current.goodCount++;
+      }
+
+      gameStateRef.current.combo++;
+      if (gameStateRef.current.combo > gameStateRef.current.maxCombo) {
+        gameStateRef.current.maxCombo = gameStateRef.current.combo;
+      }
+
+      const comboMultiplier = Math.min(1 + Math.floor(gameStateRef.current.combo / 10) * 0.1, 2);
+      const hitScore = Math.round(SCORE_VALUES[hitType] * comboMultiplier);
+      gameStateRef.current.score += hitScore;
+
+      playHitSound(hitType);
+
+      const updatedNotes = [...notes];
+      if (isHoldNote) {
+        // Hold note: mark holdStarted, store initial score
+        updatedNotes[closestNoteIdx] = {
+          ...updatedNotes[closestNoteIdx],
+          holdStarted: true,
+          holdInitialScore: hitScore,
+        };
+      } else {
+        // Tap note: mark hit immediately
+        updatedNotes[closestNoteIdx] = { ...updatedNotes[closestNoteIdx], hit: true };
+      }
+      notesRef.current = updatedNotes;
+
+      hitEffectsRef.current.push({
+        id: Date.now() + Math.random(),
+        lane: laneIndex,
+        type: hitType,
+        time: performance.now(),
+      });
+    }
+  }, [playHitSound, isPaused]);
+
+  // Helper: handle key/touch release for a lane
+  const handleLaneRelease = useCallback((laneIndex: number) => {
+    if (!gameStartedRef.current || isPaused) return;
+
+    const currentTime = performance.now() - gameStateRef.current.startTime;
+    const notes = notesRef.current;
+
+    // Find any hold note in this lane that is being held
+    let holdNoteIdx = -1;
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i];
+      if (note.holdStarted && !note.holdReleased && !note.hit && !note.missed && note.lane === laneIndex && note.duration && note.duration > 0) {
+        holdNoteIdx = i;
+        break;
+      }
+    }
+
+    if (holdNoteIdx < 0) return;
+
+    const note = notes[holdNoteIdx];
+    const noteEndTime = note.time + (note.duration ?? 0);
+    const timeUntilEnd = noteEndTime - currentTime;
+
+    const updatedNotes = [...notes];
+
+    if (timeUntilEnd <= TIMING_WINDOWS.good) {
+      // Released near the end → hold completed successfully!
+      updatedNotes[holdNoteIdx] = {
+        ...updatedNotes[holdNoteIdx],
+        hit: true,
+        holdReleased: true,
+      };
+      notesRef.current = updatedNotes;
+
+      // Give bonus score (1.5x initial → add 0.5x)
+      const bonusScore = Math.round(note.holdInitialScore * 0.5);
+      gameStateRef.current.score += bonusScore;
+
+      playHitSound('perfect');
+
+      hitEffectsRef.current.push({
+        id: Date.now() + Math.random(),
+        lane: laneIndex,
+        type: 'perfect',
+        time: performance.now(),
+      });
+    } else if (currentTime >= noteEndTime) {
+      // Released after the end time → auto-complete with full bonus
+      updatedNotes[holdNoteIdx] = {
+        ...updatedNotes[holdNoteIdx],
+        hit: true,
+        holdReleased: true,
+      };
+      notesRef.current = updatedNotes;
+
+      const bonusScore = Math.round(note.holdInitialScore * 0.5);
+      gameStateRef.current.score += bonusScore;
+
+      playHitSound('perfect');
+
+      hitEffectsRef.current.push({
+        id: Date.now() + Math.random(),
+        lane: laneIndex,
+        type: 'perfect',
+        time: performance.now(),
+      });
+    } else {
+      // Released too early
+      const heldDuration = currentTime - note.time;
+      const totalDuration = note.duration ?? 1;
+      const holdProgress = heldDuration / totalDuration;
+
+      if (holdProgress > 0.5) {
+        // More than 50% held: partial credit (keep initial score, no bonus), break combo
+        updatedNotes[holdNoteIdx] = {
+          ...updatedNotes[holdNoteIdx],
+          holdReleased: true,
+          missed: true,
+        };
+        notesRef.current = updatedNotes;
+        gameStateRef.current.combo = 0;
+
+        hitEffectsRef.current.push({
+          id: Date.now() + Math.random(),
+          lane: laneIndex,
+          type: 'miss',
+          time: performance.now(),
+        });
+      } else {
+        // Less than 50% held: mark as miss, break combo
+        updatedNotes[holdNoteIdx] = {
+          ...updatedNotes[holdNoteIdx],
+          holdReleased: true,
+          missed: true,
+        };
+        notesRef.current = updatedNotes;
+        gameStateRef.current.missCount++;
+        gameStateRef.current.combo = 0;
+
+        hitEffectsRef.current.push({
+          id: Date.now() + Math.random(),
+          lane: laneIndex,
+          type: 'miss',
+          time: performance.now(),
+        });
+      }
+    }
+  }, [playHitSound, isPaused]);
+
   // Key handlers
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -426,63 +611,15 @@ function GamePlay({
       if (keysDownRef.current.has(laneIndex)) return;
       keysDownRef.current.add(laneIndex);
 
-      if (!gameStartedRef.current || isPaused) return;
-
-      const currentTime = performance.now() - gameStateRef.current.startTime;
-      let closestNoteIdx = -1;
-      let closestDiff = Infinity;
-
-      const notes = notesRef.current;
-      for (let i = 0; i < notes.length; i++) {
-        const note = notes[i];
-        if (note.hit || note.missed || note.lane !== laneIndex) continue;
-        const diff = Math.abs(note.time - currentTime);
-        if (diff < closestDiff && diff <= TIMING_WINDOWS.good) {
-          closestDiff = diff;
-          closestNoteIdx = i;
-        }
-      }
-
-      if (closestNoteIdx >= 0) {
-        const updatedNotes = [...notes];
-        updatedNotes[closestNoteIdx] = { ...updatedNotes[closestNoteIdx], hit: true };
-        notesRef.current = updatedNotes;
-
-        let hitType: 'perfect' | 'great' | 'good';
-        if (closestDiff <= TIMING_WINDOWS.perfect) {
-          hitType = 'perfect';
-          gameStateRef.current.perfectCount++;
-        } else if (closestDiff <= TIMING_WINDOWS.great) {
-          hitType = 'great';
-          gameStateRef.current.greatCount++;
-        } else {
-          hitType = 'good';
-          gameStateRef.current.goodCount++;
-        }
-
-        gameStateRef.current.combo++;
-        if (gameStateRef.current.combo > gameStateRef.current.maxCombo) {
-          gameStateRef.current.maxCombo = gameStateRef.current.combo;
-        }
-
-        const comboMultiplier = Math.min(1 + Math.floor(gameStateRef.current.combo / 10) * 0.1, 2);
-        gameStateRef.current.score += Math.round(SCORE_VALUES[hitType] * comboMultiplier);
-
-        playHitSound(hitType);
-
-        hitEffectsRef.current.push({
-          id: Date.now() + Math.random(),
-          lane: laneIndex,
-          type: hitType,
-          time: performance.now(),
-        });
-      }
+      handleLanePress(laneIndex);
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const laneIndex = KEY_CODES.indexOf(e.code);
       if (laneIndex === -1) return;
       keysDownRef.current.delete(laneIndex);
+
+      handleLaneRelease(laneIndex);
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -491,7 +628,7 @@ function GamePlay({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [playHitSound, isPaused, handlePause, handleResume]);
+  }, [handleLanePress, handleLaneRelease, isPaused, handlePause, handleResume]);
 
   const triggerGameEnd = useCallback(() => {
     if (gameStateRef.current.gameEnded) return;
@@ -696,81 +833,275 @@ function GamePlay({
       let allNotesProcessed = true;
 
       const notes = notesRef.current;
+      const updatedNotesBatch: { idx: number; note: ActiveNote }[] = [];
+
       for (let ni = 0; ni < notes.length; ni++) {
         const note = notes[ni];
-        if (note.hit || note.missed) continue;
+        if (note.hit || note.missed || note.holdReleased) continue;
 
+        const isHoldNote = !!(note.duration && note.duration > 0);
         const timeDiff = note.time - currentTime;
-        const noteY = hitZoneY - (timeDiff / NOTE_TRAVEL_TIME) * hitZoneY;
 
-        if (noteY < -NOTE_HEIGHT * 3) {
+        // For hold notes being held, check auto-completion
+        if (isHoldNote && note.holdStarted && !note.holdReleased) {
+          const tailEndTime = note.time + (note.duration ?? 0);
+          // Auto-complete: player held through past the tail
+          if (currentTime > tailEndTime + TIMING_WINDOWS.good) {
+            updatedNotesBatch.push({
+              idx: ni,
+              note: { ...note, hit: true, holdReleased: true },
+            });
+            // Give full bonus
+            const bonusScore = Math.round(note.holdInitialScore * 0.5);
+            gameStateRef.current.score += bonusScore;
+            gameStateRef.current.perfectCount++;
+            gameStateRef.current.combo++;
+            if (gameStateRef.current.combo > gameStateRef.current.maxCombo) {
+              gameStateRef.current.maxCombo = gameStateRef.current.combo;
+            }
+            continue;
+          }
+          // Hold note still being held - not processed yet
           allNotesProcessed = false;
-          continue;
+        } else if (isHoldNote && !note.holdStarted) {
+          // Hold note head not yet pressed
+          // Check if head was missed (same as tap note miss detection)
+          if (timeDiff < -TIMING_WINDOWS.good) {
+            updatedNotesBatch.push({
+              idx: ni,
+              note: { ...note, missed: true },
+            });
+            gameStateRef.current.missCount++;
+            gameStateRef.current.combo = 0;
+
+            hitEffectsRef.current.push({
+              id: Date.now() + Math.random(),
+              lane: note.lane,
+              type: 'miss',
+              time: performance.now(),
+            });
+            continue;
+          }
+          allNotesProcessed = false;
+        } else {
+          // Tap note logic (unchanged)
+          if (timeDiff < -TIMING_WINDOWS.good) {
+            updatedNotesBatch.push({
+              idx: ni,
+              note: { ...note, missed: true },
+            });
+            gameStateRef.current.missCount++;
+            gameStateRef.current.combo = 0;
+
+            hitEffectsRef.current.push({
+              id: Date.now() + Math.random(),
+              lane: note.lane,
+              type: 'miss',
+              time: performance.now(),
+            });
+            continue;
+          }
+          allNotesProcessed = false;
         }
 
-        // Note is below the hit zone - check for miss
-        if (timeDiff < -TIMING_WINDOWS.good) {
-          const updatedNotes = [...notes];
-          updatedNotes[ni] = { ...note, missed: true };
-          notesRef.current = updatedNotes;
-          gameStateRef.current.missCount++;
-          gameStateRef.current.combo = 0;
-
-          hitEffectsRef.current.push({
-            id: Date.now() + Math.random(),
-            lane: note.lane,
-            type: 'miss',
-            time: performance.now(),
-          });
-
-          continue;
-        }
-
-        allNotesProcessed = false;
-
+        // ---- RENDER NOTE ----
         const x = laneOffset + note.lane * laneW;
         const noteX = x + NOTE_GAP;
         const noteW = laneW - NOTE_GAP * 2;
         const palette = NOTE_PALETTES[note.colorIdx];
 
-        // Note glow effect (when close to hit zone)
-        const proximity = Math.max(0, 1 - Math.abs(timeDiff) / NOTE_TRAVEL_TIME);
-        if (proximity > 0.5) {
-          const glowAlpha = (proximity - 0.5) * 2 * 0.15;
-          ctx.fillStyle = palette.glow + Math.round(glowAlpha * 255).toString(16).padStart(2, '0');
+        if (isHoldNote) {
+          // === HOLD NOTE RENDERING ===
+          const headTimeDiff = note.time - currentTime;
+          const tailTimeDiff = (note.time + (note.duration ?? 0)) - currentTime;
+
+          let headY = hitZoneY - (headTimeDiff / NOTE_TRAVEL_TIME) * hitZoneY;
+          const tailY = hitZoneY - (tailTimeDiff / NOTE_TRAVEL_TIME) * hitZoneY;
+
+          // If holdStarted, clamp head at hitZoneY
+          if (note.holdStarted) {
+            headY = hitZoneY;
+          }
+
+          // Skip if entirely off screen
+          if (tailY > h + NOTE_HEIGHT && headY > h + NOTE_HEIGHT) continue;
+          if (headY < -NOTE_HEIGHT * 3 && tailY < -NOTE_HEIGHT * 3) continue;
+
+          const barW = noteW * 0.5;
+          const barX = x + (laneW - barW) / 2;
+          const drawHeadY = Math.max(headY, -NOTE_HEIGHT);
+          const drawTailY = Math.min(tailY, h + NOTE_HEIGHT);
+
+          // Calculate hold progress for visual effect
+          const holdProgress = note.holdStarted
+            ? Math.min(Math.max((currentTime - note.time) / (note.duration ?? 1), 0), 1)
+            : 0;
+
+          // Progress Y: the point up to which the hold has been completed
+          const progressY = note.holdStarted
+            ? drawHeadY - (drawHeadY - drawTailY) * holdProgress
+            : drawTailY;
+
+          // Draw connecting bar - dimmer (remaining/uncompleted portion)
+          if (drawTailY < drawHeadY) {
+            const barGrad = ctx.createLinearGradient(barX, drawTailY, barX, drawHeadY);
+            barGrad.addColorStop(0, palette.light + '40');
+            barGrad.addColorStop(1, palette.main + '60');
+            ctx.fillStyle = barGrad;
+            ctx.beginPath();
+            ctx.roundRect(barX, drawTailY, barW, drawHeadY - drawTailY, 4);
+            ctx.fill();
+          }
+
+          // Draw completed portion (brighter) when being held
+          if (note.holdStarted && progressY < drawHeadY) {
+            const completedGrad = ctx.createLinearGradient(barX, progressY, barX, drawHeadY);
+            completedGrad.addColorStop(0, palette.main + 'AA');
+            completedGrad.addColorStop(1, palette.main + 'DD');
+            ctx.fillStyle = completedGrad;
+            ctx.beginPath();
+            ctx.roundRect(barX, progressY, barW, drawHeadY - progressY, 4);
+            ctx.fill();
+
+            // Pulsing glow on the bar when being held
+            const pulseAlpha = 0.15 + Math.sin(frameCount * 0.15) * 0.08;
+            ctx.fillStyle = palette.glow + Math.round(pulseAlpha * 255).toString(16).padStart(2, '0');
+            ctx.beginPath();
+            ctx.roundRect(barX - 4, progressY - 2, barW + 8, drawHeadY - progressY + 4, 6);
+            ctx.fill();
+          }
+
+          // Draw head (same as tap note)
+          // Head glow
+          const headProximity = Math.max(0, 1 - Math.abs(headTimeDiff) / NOTE_TRAVEL_TIME);
+          if (headProximity > 0.5 || note.holdStarted) {
+            const glowAlpha = note.holdStarted ? 0.2 : (headProximity - 0.5) * 2 * 0.15;
+            ctx.fillStyle = palette.glow + Math.round(glowAlpha * 255).toString(16).padStart(2, '0');
+            ctx.beginPath();
+            ctx.roundRect(noteX - 3, headY - 3, noteW + 6, NOTE_HEIGHT + 6, 9);
+            ctx.fill();
+          }
+
+          // Head shadow
+          ctx.fillStyle = palette.main + '18';
           ctx.beginPath();
-          ctx.roundRect(noteX - 3, noteY - 3, noteW + 6, NOTE_HEIGHT + 6, 9);
+          ctx.roundRect(noteX + 2, headY + 2, noteW, NOTE_HEIGHT, 7);
           ctx.fill();
+
+          // Head body
+          const headGrad = ctx.createLinearGradient(noteX, headY, noteX + noteW, headY + NOTE_HEIGHT);
+          headGrad.addColorStop(0, palette.main);
+          headGrad.addColorStop(0.6, palette.main + 'DD');
+          headGrad.addColorStop(1, palette.light);
+          ctx.fillStyle = headGrad;
+          ctx.beginPath();
+          ctx.roundRect(noteX, headY, noteW, NOTE_HEIGHT, 7);
+          ctx.fill();
+
+          // Head shine
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.beginPath();
+          ctx.roundRect(noteX + 3, headY + 1, noteW - 6, NOTE_HEIGHT * 0.4, [4, 4, 1, 1]);
+          ctx.fill();
+
+          // Head border
+          ctx.strokeStyle = palette.main + '40';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.roundRect(noteX, headY, noteW, NOTE_HEIGHT, 7);
+          ctx.stroke();
+
+          // Draw tail indicator (smaller rounded rect with diamond)
+          const tailH = NOTE_HEIGHT * 0.7;
+          const tailW = noteW * 0.7;
+          const tailX = x + (laneW - tailW) / 2;
+
+          // Tail body
+          const tailGrad = ctx.createLinearGradient(tailX, tailY, tailX + tailW, tailY + tailH);
+          tailGrad.addColorStop(0, palette.main + 'CC');
+          tailGrad.addColorStop(1, palette.light + 'AA');
+          ctx.fillStyle = tailGrad;
+          ctx.beginPath();
+          ctx.roundRect(tailX, tailY, tailW, tailH, 5);
+          ctx.fill();
+
+          // Tail border
+          ctx.strokeStyle = palette.main + '60';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.roundRect(tailX, tailY, tailW, tailH, 5);
+          ctx.stroke();
+
+          // Diamond indicator at tail center
+          const dCx = x + laneW / 2;
+          const dCy = tailY + tailH / 2;
+          const dSize = 4;
+          ctx.fillStyle = palette.light;
+          ctx.beginPath();
+          ctx.moveTo(dCx, dCy - dSize);
+          ctx.lineTo(dCx + dSize, dCy);
+          ctx.lineTo(dCx, dCy + dSize);
+          ctx.lineTo(dCx - dSize, dCy);
+          ctx.closePath();
+          ctx.fill();
+
+        } else {
+          // === TAP NOTE RENDERING (unchanged) ===
+          const noteY = hitZoneY - (timeDiff / NOTE_TRAVEL_TIME) * hitZoneY;
+
+          if (noteY < -NOTE_HEIGHT * 3) {
+            allNotesProcessed = false;
+            continue;
+          }
+
+          // Note glow effect (when close to hit zone)
+          const proximity = Math.max(0, 1 - Math.abs(timeDiff) / NOTE_TRAVEL_TIME);
+          if (proximity > 0.5) {
+            const glowAlpha = (proximity - 0.5) * 2 * 0.15;
+            ctx.fillStyle = palette.glow + Math.round(glowAlpha * 255).toString(16).padStart(2, '0');
+            ctx.beginPath();
+            ctx.roundRect(noteX - 3, noteY - 3, noteW + 6, NOTE_HEIGHT + 6, 9);
+            ctx.fill();
+          }
+
+          // Note shadow
+          ctx.fillStyle = palette.main + '18';
+          ctx.beginPath();
+          ctx.roundRect(noteX + 2, noteY + 2, noteW, NOTE_HEIGHT, 7);
+          ctx.fill();
+
+          // Note body with gradient
+          const noteGrad = ctx.createLinearGradient(noteX, noteY, noteX + noteW, noteY + NOTE_HEIGHT);
+          noteGrad.addColorStop(0, palette.main);
+          noteGrad.addColorStop(0.6, palette.main + 'DD');
+          noteGrad.addColorStop(1, palette.light);
+          ctx.fillStyle = noteGrad;
+          ctx.beginPath();
+          ctx.roundRect(noteX, noteY, noteW, NOTE_HEIGHT, 7);
+          ctx.fill();
+
+          // Note shine
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.beginPath();
+          ctx.roundRect(noteX + 3, noteY + 1, noteW - 6, NOTE_HEIGHT * 0.4, [4, 4, 1, 1]);
+          ctx.fill();
+
+          // Note border
+          ctx.strokeStyle = palette.main + '40';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.roundRect(noteX, noteY, noteW, NOTE_HEIGHT, 7);
+          ctx.stroke();
         }
+      }
 
-        // Note shadow
-        ctx.fillStyle = palette.main + '18';
-        ctx.beginPath();
-        ctx.roundRect(noteX + 2, noteY + 2, noteW, NOTE_HEIGHT, 7);
-        ctx.fill();
-
-        // Note body with gradient
-        const noteGrad = ctx.createLinearGradient(noteX, noteY, noteX + noteW, noteY + NOTE_HEIGHT);
-        noteGrad.addColorStop(0, palette.main);
-        noteGrad.addColorStop(0.6, palette.main + 'DD');
-        noteGrad.addColorStop(1, palette.light);
-        ctx.fillStyle = noteGrad;
-        ctx.beginPath();
-        ctx.roundRect(noteX, noteY, noteW, NOTE_HEIGHT, 7);
-        ctx.fill();
-
-        // Note shine
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.beginPath();
-        ctx.roundRect(noteX + 3, noteY + 1, noteW - 6, NOTE_HEIGHT * 0.4, [4, 4, 1, 1]);
-        ctx.fill();
-
-        // Note border
-        ctx.strokeStyle = palette.main + '40';
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        ctx.roundRect(noteX, noteY, noteW, NOTE_HEIGHT, 7);
-        ctx.stroke();
+      // Apply batched note updates
+      if (updatedNotesBatch.length > 0) {
+        const updatedNotes = [...notes];
+        for (const { idx, note } of updatedNotesBatch) {
+          updatedNotes[idx] = note;
+        }
+        notesRef.current = updatedNotes;
       }
 
       // Draw hit effects
@@ -780,7 +1111,7 @@ function GamePlay({
         if (age > 700) return false;
 
         const x = laneOffset + effect.lane * laneW + laneW / 2;
-        const y = hitZoneY;
+        const y = effect.y ?? hitZoneY;
         const alpha = Math.max(0, 1 - age / 700);
 
         if (effect.type === 'miss') {
@@ -788,7 +1119,7 @@ function GamePlay({
           ctx.save();
           ctx.globalAlpha = alpha * 0.4;
           ctx.fillStyle = '#FF3B30';
-          ctx.fillRect(laneOffset + effect.lane * laneW, hitZoneY - 15, laneW, NOTE_HEIGHT + 30);
+          ctx.fillRect(laneOffset + effect.lane * laneW, y - 15, laneW, NOTE_HEIGHT + 30);
           ctx.restore();
 
           ctx.fillStyle = `rgba(255, 59, 48, ${alpha})`;
@@ -876,62 +1207,14 @@ function GamePlay({
     if (isPaused) return;
     keysDownRef.current.add(laneIndex);
 
-    if (!gameStartedRef.current) return;
-
-    const currentTime = performance.now() - gameStateRef.current.startTime;
-    let closestNoteIdx = -1;
-    let closestDiff = Infinity;
-
-    const notes = notesRef.current;
-    for (let i = 0; i < notes.length; i++) {
-      const note = notes[i];
-      if (note.hit || note.missed || note.lane !== laneIndex) continue;
-      const diff = Math.abs(note.time - currentTime);
-      if (diff < closestDiff && diff <= TIMING_WINDOWS.good) {
-        closestDiff = diff;
-        closestNoteIdx = i;
-      }
-    }
-
-    if (closestNoteIdx >= 0) {
-      const updatedNotes = [...notes];
-      updatedNotes[closestNoteIdx] = { ...updatedNotes[closestNoteIdx], hit: true };
-      notesRef.current = updatedNotes;
-
-      let hitType: 'perfect' | 'great' | 'good';
-      if (closestDiff <= TIMING_WINDOWS.perfect) {
-        hitType = 'perfect';
-        gameStateRef.current.perfectCount++;
-      } else if (closestDiff <= TIMING_WINDOWS.great) {
-        hitType = 'great';
-        gameStateRef.current.greatCount++;
-      } else {
-        hitType = 'good';
-        gameStateRef.current.goodCount++;
-      }
-
-      gameStateRef.current.combo++;
-      if (gameStateRef.current.combo > gameStateRef.current.maxCombo) {
-        gameStateRef.current.maxCombo = gameStateRef.current.combo;
-      }
-
-      const comboMultiplier = Math.min(1 + Math.floor(gameStateRef.current.combo / 10) * 0.1, 2);
-      gameStateRef.current.score += Math.round(SCORE_VALUES[hitType] * comboMultiplier);
-
-      playHitSound(hitType);
-
-      hitEffectsRef.current.push({
-        id: Date.now() + Math.random(),
-        lane: laneIndex,
-        type: hitType,
-        time: performance.now(),
-      });
-    }
-  }, [playHitSound, isPaused]);
+    handleLanePress(laneIndex);
+  }, [handleLanePress, isPaused]);
 
   const handleTouchEnd = useCallback((laneIndex: number) => () => {
     keysDownRef.current.delete(laneIndex);
-  }, []);
+
+    handleLaneRelease(laneIndex);
+  }, [handleLaneRelease]);
 
   // Cleanup audio on unmount
   useEffect(() => {
